@@ -436,6 +436,13 @@
     }
   </style>
 </head>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js')
+    .then(() => console.log('✅ PWA instalado!'))
+    .catch(err => console.error('❌ Erro PWA:', err))
+}
+</script>
 <body>
   <div class="bg-gradient"></div>
   
