@@ -91,9 +91,9 @@ function initMap() {
     attributionControl: false
   }).setView([-22.9068, -43.1729], 12) // Rio de Janeiro
 
-  // Mapa com TODAS as ruas detalhadas
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 20, // Zoom máximo aumentado
+  // Mapa CLARO com TODAS as ruas visíveis
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
     minZoom: 3
   }).addTo(map)
   
