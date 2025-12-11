@@ -126,6 +126,22 @@
       font-size: 0.9rem;
       margin-bottom: 2rem;
     }
+
+    .fab.active {
+  background: linear-gradient(135deg, var(--success), #059669);
+  animation: pulseFollow 1.5s infinite;
+}
+
+@keyframes pulseFollow {
+  0%, 100% { 
+    transform: scale(1);
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
+  }
+  50% { 
+    transform: scale(1.08);
+    box-shadow: 0 12px 35px rgba(16, 185, 129, 0.6);
+  }
+}
     
     .google-btn {
       width: 100%;
@@ -502,13 +518,20 @@ if ('serviceWorker' in navigator) {
     <div class="map-section">
       <div id="map"></div>
       
-      <button class="fab" onclick="centerOnMyLocation()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
-        </svg>
-      </button>
+      <button class="fab" onclick="centerOnMyLocation()" style="bottom: 170px;">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <circle cx="12" cy="12" r="10"/>
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+  </svg>
+</button>
+
+<button class="fab" id="followBtn" onclick="toggleFollow()" style="bottom: 100px;">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M12 2a8 8 0 0 0-8 8c0 5.4 7 11 8 12 1-1 8-6.6 8-12a8 8 0 0 0-8-8z"/>
+    <circle cx="12" cy="10" r="3"/>
+  </svg>
+</button>
       
       <div class="bottom-sheet" id="bottomSheet">
         <div class="sheet-handle" onclick="toggleSheet()"></div>

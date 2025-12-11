@@ -17,6 +17,8 @@ let myDeviceId = null
 let locationWatchId = null
 let devices = []
 let lastAddressCache = {}
+let isFollowing = false
+let selectedDeviceIndex = null
 
 // ============================================
 // AUTENTICAÇÃO
@@ -97,6 +99,13 @@ function initMap() {
   L.control.zoom({
     position: 'topright'
   }).addTo(map)
+  
+  // Desativa o seguimento quando o usuário move o mapa manualmente
+  map.on('dragstart', () => {
+    if (isFollowing) {
+      toggleFollow()
+    }
+  })
 }
 
 function createMarker(device) {
@@ -327,7 +336,7 @@ function updateDevicesList() {
     }
     
     return `
-    <div class="device-card ${index === 0 ? 'active' : ''}" onclick="selectDevice(${index})">
+    <div class="device-card ${index === selectedDeviceIndex ? 'active' : ''}" onclick="selectDevice(${index})">
       <img class="device-avatar" src="${device.photo_url}" alt="${device.name}">
       <div class="device-info">
         <div class="device-name">${device.name} ${device.owner_id === currentUser.id ? '(Você)' : ''}</div>
@@ -366,13 +375,21 @@ function updateMap() {
     }
   })
   
-  if (devices.length > 0 && devices[0].latitude) {
+  // Só move o mapa automaticamente se estiver seguindo
+  if (isFollowing && selectedDeviceIndex !== null && devices[selectedDeviceIndex]) {
+    const device = devices[selectedDeviceIndex]
+    if (device.latitude && device.longitude) {
+      map.setView([device.latitude, device.longitude], map.getZoom())
+    }
+  } else if (devices.length > 0 && devices[0].latitude && !map.getCenter()) {
+    // Primeira carga: centraliza no primeiro dispositivo
     map.setView([devices[0].latitude, devices[0].longitude], 16)
   }
 }
 
 function selectDevice(index) {
   const device = devices[index]
+  selectedDeviceIndex = index
   
   document.querySelectorAll('.device-card').forEach((card, i) => {
     card.classList.toggle('active', i === index)
@@ -404,6 +421,39 @@ function centerOnMyLocation() {
     if (markers[myDevice.id]) {
       markers[myDevice.id].openPopup()
     }
+    
+    // Define o dispositivo selecionado como o próprio usuário
+    selectedDeviceIndex = devices.findIndex(d => d.owner_id === currentUser.id)
+    updateDevicesList()
+  }
+}
+
+function toggleFollow() {
+  isFollowing = !isFollowing
+  const followBtn = document.getElementById('followBtn')
+  
+  if (isFollowing) {
+    followBtn.classList.add('active')
+    console.log('🎯 Modo seguir ATIVADO')
+    
+    // Se não há dispositivo selecionado, seleciona o próprio usuário
+    if (selectedDeviceIndex === null) {
+      selectedDeviceIndex = devices.findIndex(d => d.owner_id === currentUser.id)
+      updateDevicesList()
+    }
+    
+    // Centraliza imediatamente no dispositivo selecionado
+    if (selectedDeviceIndex !== null && devices[selectedDeviceIndex]) {
+      const device = devices[selectedDeviceIndex]
+      if (device.latitude && device.longitude) {
+        map.flyTo([device.latitude, device.longitude], 18, {
+          duration: 1
+        })
+      }
+    }
+  } else {
+    followBtn.classList.remove('active')
+    console.log('🗺️ Modo seguir DESATIVADO - mapa livre')
   }
 }
 
@@ -652,6 +702,14 @@ function setupRealtime() {
         }
         if (payload.new.latitude && payload.new.longitude) {
           markers[payload.new.id] = createMarker(payload.new)
+          
+          // Se estiver seguindo este dispositivo, atualiza a posição do mapa
+          if (isFollowing && selectedDeviceIndex !== null) {
+            const selectedDevice = devices[selectedDeviceIndex]
+            if (selectedDevice && selectedDevice.id === payload.new.id) {
+              map.setView([payload.new.latitude, payload.new.longitude], map.getZoom())
+            }
+          }
         }
       }
     )
