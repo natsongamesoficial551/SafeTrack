@@ -16,7 +16,7 @@ let currentUser = null
 let myDeviceId = null
 let locationWatchId = null
 let devices = []
-let lastAddressCache = {} // Cache para evitar requests repetidas
+let lastAddressCache = {}
 
 // ============================================
 // AUTENTICAÇÃO
@@ -58,14 +58,12 @@ function showApp() {
   document.getElementById('loginScreen').classList.add('hidden')
   document.getElementById('appContainer').classList.add('active')
   
-  // Atualizar UI com dados do usuário
   const userName = currentUser.user_metadata.full_name || currentUser.email
   const userPhoto = currentUser.user_metadata.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=6366f1&color=fff`
   
   document.getElementById('userName').textContent = userName.split(' ')[0]
   document.getElementById('userAvatar').src = userPhoto
   
-  // Inicializar app
   setTimeout(() => {
     initMap()
     initMyDevice()
@@ -89,21 +87,31 @@ function initMap() {
   map = L.map('map', {
     zoomControl: false,
     attributionControl: false
-  }).setView([-22.9068, -43.1729], 12) // Rio de Janeiro
+  }).setView([-22.9068, -43.1729], 12)
 
-  // Mapa CLARO com TODAS as ruas visíveis
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     minZoom: 3
   }).addTo(map)
   
-  // Adicionar controle de zoom personalizado
   L.control.zoom({
     position: 'topright'
   }).addTo(map)
 }
 
 function createMarker(device) {
+  let precisionIcon = '🎯'
+  let precisionColor = '#10b981'
+  
+  if (device.accuracy > 100) {
+    precisionIcon = '📡'
+    precisionColor = '#f59e0b'
+  }
+  if (device.accuracy > 500) {
+    precisionIcon = '🌐'
+    precisionColor = '#ef4444'
+  }
+  
   const icon = L.divIcon({
     className: 'custom-marker-container',
     html: `<div style="
@@ -147,15 +155,25 @@ function createMarker(device) {
             <strong>🔋 Bateria:</strong><br>
             ${device.battery}%
           </div>
-          <div>
-            <strong>🎯 Precisão:</strong><br>
-            ${device.accuracy ? device.accuracy + ' metros' : 'N/A'}
+          <div style="grid-column: 1 / -1;">
+            <strong>${precisionIcon} Precisão:</strong><br>
+            <span style="color: ${precisionColor}; font-weight: 600;">
+              ${device.accuracy ? device.accuracy + ' metros' : 'N/A'}
+              ${device.accuracy > 100 ? ' (WiFi/IP)' : ' (GPS)'}
+            </span>
           </div>
           <div>
             <strong>📱 Dispositivo:</strong><br>
             ${device.device_name || 'Navegador'}
           </div>
         </div>
+        
+        ${device.accuracy > 100 ? `
+          <div style="margin-top: 10px; padding: 8px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 0.8em; color: #92400e;">
+            ⚠️ <strong>Localização aproximada</strong><br>
+            ${device.device_name && device.device_name.includes('PC') ? 'Computadores usam WiFi/IP (não têm GPS real)' : 'Sinal GPS fraco ou indisponível'}
+          </div>
+        ` : ''}
         
         <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 0.75em; color: #94a3b8;">
           <strong>Coordenadas:</strong> ${device.latitude.toFixed(6)}, ${device.longitude.toFixed(6)}
@@ -172,7 +190,7 @@ function createMarker(device) {
 function formatTime(timestamp) {
   const date = new Date(timestamp)
   const now = new Date()
-  const diff = Math.floor((now - date) / 1000) // segundos
+  const diff = Math.floor((now - date) / 1000)
   
   if (diff < 60) return 'Agora mesmo'
   if (diff < 3600) return `${Math.floor(diff / 60)} min atrás`
@@ -186,7 +204,6 @@ function formatTime(timestamp) {
 
 async function initMyDevice() {
   try {
-    // Verificar se já existe dispositivo para este usuário
     const { data: existingDevice } = await supabase
       .from('devices')
       .select('*')
@@ -196,7 +213,6 @@ async function initMyDevice() {
     if (existingDevice) {
       myDeviceId = existingDevice.id
     } else {
-      // Criar novo dispositivo
       const deviceName = getDeviceName()
       const userName = currentUser.user_metadata.full_name || currentUser.email
       const userPhoto = currentUser.user_metadata.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=6366f1&color=fff`
@@ -223,16 +239,35 @@ async function initMyDevice() {
 
 function getDeviceName() {
   const ua = navigator.userAgent
+  
   if (/android/i.test(ua)) {
     const match = ua.match(/Android.*;\s+(.*?)\s+Build/)
     return match ? match[1] : 'Android'
   }
-  if (/iPad|iPhone|iPod/.test(ua)) {
-    return ua.match(/iPhone/) ? 'iPhone' : 'iPad'
+  
+  if (/iPad/.test(ua)) return 'iPad'
+  if (/iPhone/.test(ua)) return 'iPhone'
+  if (/iPod/.test(ua)) return 'iPod'
+  
+  if (/Windows/.test(ua)) {
+    if (/Phone/.test(ua)) return 'Windows Phone'
+    if (/Touch/.test(ua)) return 'Windows Tablet'
+    return 'Windows PC'
   }
-  if (/Windows/.test(ua)) return 'Windows PC'
-  if (/Mac/.test(ua)) return 'Mac'
-  return 'Navegador'
+  
+  if (/Macintosh|MacIntel|MacPPC|Mac68K/.test(ua)) {
+    if (/iPad/.test(ua)) return 'iPad'
+    return 'Mac'
+  }
+  
+  if (/Linux/.test(ua)) {
+    if (/Android/.test(ua)) return 'Android'
+    return 'Linux PC'
+  }
+  
+  if (/CrOS/.test(ua)) return 'Chromebook'
+  
+  return 'Navegador Web'
 }
 
 async function loadDevices() {
@@ -275,7 +310,23 @@ function updateDevicesList() {
   
   onlineCount.textContent = `${devices.length} Online`
   
-  list.innerHTML = devices.map((device, index) => `
+  list.innerHTML = devices.map((device, index) => {
+    let precisionIcon = '🎯'
+    let precisionColor = '#10b981'
+    let precisionText = 'GPS'
+    
+    if (device.accuracy > 100) {
+      precisionIcon = '📡'
+      precisionColor = '#f59e0b'
+      precisionText = 'WiFi'
+    }
+    if (device.accuracy > 500) {
+      precisionIcon = '🌐'
+      precisionColor = '#ef4444'
+      precisionText = 'IP'
+    }
+    
+    return `
     <div class="device-card ${index === 0 ? 'active' : ''}" onclick="selectDevice(${index})">
       <img class="device-avatar" src="${device.photo_url}" alt="${device.name}">
       <div class="device-info">
@@ -297,24 +348,24 @@ function updateDevicesList() {
           </svg>
           ${device.battery}%
         </div>
+        <div style="font-size: 0.75rem; color: ${precisionColor}; margin-top: 4px;">
+          ${precisionIcon} ${precisionText} ${device.accuracy}m
+        </div>
       </div>
     </div>
-  `).join('')
+  `}).join('')
 }
 
 function updateMap() {
-  // Limpar marcadores antigos
   Object.values(markers).forEach(marker => marker.remove())
   markers = {}
   
-  // Adicionar novos marcadores
   devices.forEach(device => {
     if (device.latitude && device.longitude) {
       markers[device.id] = createMarker(device)
     }
   })
   
-  // Centralizar no primeiro dispositivo
   if (devices.length > 0 && devices[0].latitude) {
     map.setView([devices[0].latitude, devices[0].longitude], 16)
   }
@@ -323,24 +374,20 @@ function updateMap() {
 function selectDevice(index) {
   const device = devices[index]
   
-  // Atualizar cards
   document.querySelectorAll('.device-card').forEach((card, i) => {
     card.classList.toggle('active', i === index)
   })
   
-  // Centralizar mapa
   if (device.latitude && device.longitude) {
     map.flyTo([device.latitude, device.longitude], 18, {
       duration: 1
     })
     
-    // Abrir popup do marcador
     if (markers[device.id]) {
       markers[device.id].openPopup()
     }
   }
   
-  // Expandir bottom sheet
   document.getElementById('bottomSheet').classList.add('expanded')
 }
 
@@ -361,7 +408,7 @@ function centerOnMyLocation() {
 }
 
 // ============================================
-// RASTREAMENTO DE LOCALIZAÇÃO - ULTRA PRECISO
+// RASTREAMENTO DE LOCALIZAÇÃO
 // ============================================
 
 function startLocationTracking() {
@@ -373,20 +420,35 @@ function startLocationTracking() {
   
   console.log('🎯 Iniciando rastreamento GPS de alta precisão...')
   
-  // Configurações PREMIUM de GPS
-  const gpsOptions = {
-    enableHighAccuracy: true,  // Força uso de GPS satélite
-    maximumAge: 0,             // Nunca usa cache
-    timeout: 20000             // 20 segundos para pegar melhor sinal
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+  const isDesktop = !isMobile
+  
+  if (isDesktop) {
+    console.warn('⚠️ AVISO: Computadores desktop/laptop usam localização por WiFi/IP')
+    console.warn('📍 Precisão limitada: 50m - 5km (depende da rede)')
+    console.warn('💡 Para rastreamento preciso, use smartphone com GPS')
   }
   
-  // Primeiro pegamos uma posição inicial
+  const gpsOptions = {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 20000
+  }
+  
   navigator.geolocation.getCurrentPosition(
     (position) => {
-      console.log('✅ GPS ativado! Precisão:', position.coords.accuracy, 'metros')
+      const accuracy = Math.round(position.coords.accuracy)
+      console.log('✅ GPS ativado! Precisão:', accuracy, 'metros')
+      
+      if (accuracy > 100) {
+        console.warn(`⚠️ PRECISÃO BAIXA: ${accuracy}m`)
+        if (isDesktop) {
+          console.warn('🖥️ Localização por WiFi/IP (computadores não têm GPS real)')
+        }
+      }
+      
       updateMyLocation(position)
       
-      // Depois iniciamos rastreamento contínuo
       locationWatchId = navigator.geolocation.watchPosition(
         updateMyLocation,
         handleLocationError,
@@ -411,10 +473,8 @@ async function updateMyLocation(position) {
   })
   
   try {
-    // Obter endereço COMPLETO (reverse geocoding)
     const address = await getAddressFromCoords(latitude, longitude)
     
-    // Atualizar no banco de dados
     const { error } = await supabase
       .from('devices')
       .update({
@@ -430,7 +490,6 @@ async function updateMyLocation(position) {
     
     if (error) throw error
     
-    // Recarregar dispositivos para atualizar UI
     await loadDevices()
     
   } catch (error) {
@@ -438,11 +497,9 @@ async function updateMyLocation(position) {
   }
 }
 
-// GEOCODING ULTRA PRECISO - Todas as ruas do mundo
 async function getAddressFromCoords(lat, lng) {
   const cacheKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`
   
-  // Verificar cache (evita requests repetidas)
   if (lastAddressCache[cacheKey]) {
     return lastAddressCache[cacheKey]
   }
@@ -450,16 +507,15 @@ async function getAddressFromCoords(lat, lng) {
   try {
     console.log('🔍 Buscando endereço preciso...')
     
-    // API OpenStreetMap Nominatim - MÁXIMA PRECISÃO
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?` +
       `format=json&` +
       `lat=${lat}&` +
       `lon=${lng}&` +
-      `zoom=18&` +                    // Zoom máximo = rua com número
-      `addressdetails=1&` +           // Detalhes completos
-      `extratags=1&` +                // Tags extras
-      `accept-language=pt-BR`,        // Idioma português
+      `zoom=18&` +
+      `addressdetails=1&` +
+      `extratags=1&` +
+      `accept-language=pt-BR`,
       {
         headers: {
           'User-Agent': 'SafeTrack Family Tracker App'
@@ -474,10 +530,8 @@ async function getAddressFromCoords(lat, lng) {
     const data = await response.json()
     const addr = data.address
     
-    // Construir endereço COMPLETO E PRECISO
     const parts = []
     
-    // 1. RUA/AVENIDA + NÚMERO
     let street = ''
     if (addr.road) {
       street = addr.road
@@ -497,7 +551,6 @@ async function getAddressFromCoords(lat, lng) {
       }
     }
     
-    // 2. BAIRRO/REGIÃO
     if (addr.neighbourhood) {
       parts.push(addr.neighbourhood)
     } else if (addr.suburb) {
@@ -508,7 +561,6 @@ async function getAddressFromCoords(lat, lng) {
       parts.push(addr.hamlet)
     }
     
-    // 3. CIDADE
     if (addr.city) {
       parts.push(addr.city)
     } else if (addr.town) {
@@ -519,29 +571,24 @@ async function getAddressFromCoords(lat, lng) {
       parts.push(addr.municipality)
     }
     
-    // 4. ESTADO (só em caso de cidades pequenas)
     if (parts.length < 3 && addr.state) {
       parts.push(addr.state)
     }
     
     let fullAddress = parts.join(', ')
     
-    // Fallback: Se não conseguiu endereço, usa coordenadas
     if (!fullAddress || fullAddress.length < 10) {
       fullAddress = `${lat.toFixed(6)}, ${lng.toFixed(6)}`
     }
     
-    // Salvar no cache
     lastAddressCache[cacheKey] = fullAddress
     
     console.log('✅ Endereço encontrado:', fullAddress)
-    console.log('📋 Dados completos:', addr)
     
     return fullAddress
     
   } catch (error) {
     console.error('❌ Erro ao obter endereço:', error)
-    // Em caso de erro, retorna coordenadas
     return `${lat.toFixed(6)}, ${lng.toFixed(6)}`
   }
 }
@@ -576,7 +623,7 @@ function handleLocationError(error) {
 }
 
 // ============================================
-// REALTIME - UPDATES AUTOMÁTICOS
+// REALTIME
 // ============================================
 
 function setupRealtime() {
@@ -591,7 +638,6 @@ function setupRealtime() {
       (payload) => {
         console.log('🔄 Dispositivo atualizado:', payload.new)
         
-        // Atualizar lista de dispositivos
         const index = devices.findIndex(d => d.id === payload.new.id)
         if (index !== -1) {
           devices[index] = payload.new
@@ -601,7 +647,6 @@ function setupRealtime() {
         
         updateDevicesList()
         
-        // Atualizar marcador no mapa
         if (markers[payload.new.id]) {
           markers[payload.new.id].remove()
         }
@@ -636,7 +681,6 @@ function setupRealtime() {
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth()
   
-  // Listener para mudanças de autenticação
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_IN') {
       currentUser = session.user
@@ -648,7 +692,6 @@ document.addEventListener('DOMContentLoaded', () => {
   })
 })
 
-// Cleanup quando sair
 window.addEventListener('beforeunload', () => {
   if (locationWatchId) {
     navigator.geolocation.clearWatch(locationWatchId)
