@@ -16,6 +16,7 @@ let currentUser = null
 let myDeviceId = null
 let locationWatchId = null
 let devices = []
+let lastAddressCache = {} // Cache para evitar requests repetidas
 
 // ============================================
 // AUTENTICAÇÃO
@@ -90,8 +91,10 @@ function initMap() {
     attributionControl: false
   }).setView([-22.9068, -43.1729], 12) // Rio de Janeiro
 
+  // Mapa com TODAS as ruas detalhadas
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19
+    maxZoom: 20, // Zoom máximo aumentado
+    minZoom: 3
   }).addTo(map)
   
   // Adicionar controle de zoom personalizado
@@ -122,12 +125,46 @@ function createMarker(device) {
   const marker = L.marker([device.latitude, device.longitude], { icon })
     .addTo(map)
     .bindPopup(`
-      <div style="color: #0f172a; min-width: 150px;">
-        <strong>${device.name}</strong><br>
-        <small>${device.last_location || 'Localizando...'}</small><br>
-        <small style="color: #666;">Atualizado: ${formatTime(device.last_update)}</small>
+      <div style="color: #0f172a; min-width: 250px; font-family: 'Plus Jakarta Sans', sans-serif;">
+        <div style="border-bottom: 2px solid #6366f1; padding-bottom: 8px; margin-bottom: 10px;">
+          <strong style="font-size: 1.2em; color: #1e293b;">${device.name}</strong>
+          ${device.owner_id === currentUser.id ? '<span style="background: #6366f1; color: white; padding: 2px 8px; border-radius: 10px; font-size: 0.7em; margin-left: 6px;">VOCÊ</span>' : ''}
+        </div>
+        
+        <div style="background: linear-gradient(135deg, #f1f5f9, #e2e8f0); padding: 12px; border-radius: 8px; margin-bottom: 10px;">
+          <div style="font-size: 0.95em; line-height: 1.6; color: #334155;">
+            <strong>📍 Localização:</strong><br>
+            ${device.last_location || 'Localizando...'}
+          </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em; color: #64748b;">
+          <div>
+            <strong>⏱ Atualizado:</strong><br>
+            ${formatTime(device.last_update)}
+          </div>
+          <div>
+            <strong>🔋 Bateria:</strong><br>
+            ${device.battery}%
+          </div>
+          <div>
+            <strong>🎯 Precisão:</strong><br>
+            ${device.accuracy ? device.accuracy + ' metros' : 'N/A'}
+          </div>
+          <div>
+            <strong>📱 Dispositivo:</strong><br>
+            ${device.device_name || 'Navegador'}
+          </div>
+        </div>
+        
+        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #e2e8f0; font-size: 0.75em; color: #94a3b8;">
+          <strong>Coordenadas:</strong> ${device.latitude.toFixed(6)}, ${device.longitude.toFixed(6)}
+        </div>
       </div>
-    `)
+    `, {
+      maxWidth: 350,
+      className: 'custom-popup'
+    })
   
   return marker
 }
@@ -140,7 +177,7 @@ function formatTime(timestamp) {
   if (diff < 60) return 'Agora mesmo'
   if (diff < 3600) return `${Math.floor(diff / 60)} min atrás`
   if (diff < 86400) return `${Math.floor(diff / 3600)}h atrás`
-  return date.toLocaleDateString('pt-BR')
+  return date.toLocaleDateString('pt-BR') + ' ' + date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
 // ============================================
@@ -279,7 +316,7 @@ function updateMap() {
   
   // Centralizar no primeiro dispositivo
   if (devices.length > 0 && devices[0].latitude) {
-    map.setView([devices[0].latitude, devices[0].longitude], 14)
+    map.setView([devices[0].latitude, devices[0].longitude], 16)
   }
 }
 
@@ -293,7 +330,7 @@ function selectDevice(index) {
   
   // Centralizar mapa
   if (device.latitude && device.longitude) {
-    map.flyTo([device.latitude, device.longitude], 16, {
+    map.flyTo([device.latitude, device.longitude], 18, {
       duration: 1
     })
     
@@ -314,7 +351,7 @@ function toggleSheet() {
 function centerOnMyLocation() {
   const myDevice = devices.find(d => d.owner_id === currentUser.id)
   if (myDevice && myDevice.latitude) {
-    map.flyTo([myDevice.latitude, myDevice.longitude], 17, {
+    map.flyTo([myDevice.latitude, myDevice.longitude], 18, {
       duration: 1.5
     })
     if (markers[myDevice.id]) {
@@ -324,42 +361,57 @@ function centerOnMyLocation() {
 }
 
 // ============================================
-// RASTREAMENTO DE LOCALIZAÇÃO
+// RASTREAMENTO DE LOCALIZAÇÃO - ULTRA PRECISO
 // ============================================
 
 function startLocationTracking() {
   if (!navigator.geolocation) {
     console.error('Geolocalização não suportada')
+    alert('Seu dispositivo não suporta geolocalização!')
     return
   }
   
-  // Solicitar permissão
+  console.log('🎯 Iniciando rastreamento GPS de alta precisão...')
+  
+  // Configurações PREMIUM de GPS
+  const gpsOptions = {
+    enableHighAccuracy: true,  // Força uso de GPS satélite
+    maximumAge: 0,             // Nunca usa cache
+    timeout: 20000             // 20 segundos para pegar melhor sinal
+  }
+  
+  // Primeiro pegamos uma posição inicial
   navigator.geolocation.getCurrentPosition(
-    () => {
-      // Iniciar rastreamento contínuo
+    (position) => {
+      console.log('✅ GPS ativado! Precisão:', position.coords.accuracy, 'metros')
+      updateMyLocation(position)
+      
+      // Depois iniciamos rastreamento contínuo
       locationWatchId = navigator.geolocation.watchPosition(
         updateMyLocation,
         handleLocationError,
-        {
-          enableHighAccuracy: true,
-          maximumAge: 5000,
-          timeout: 10000
-        }
+        gpsOptions
       )
     },
-    handleLocationError
+    handleLocationError,
+    gpsOptions
   )
 }
 
 async function updateMyLocation(position) {
   if (!myDeviceId) return
   
-  const { latitude, longitude } = position.coords
+  const { latitude, longitude, accuracy } = position.coords
   const battery = await getBatteryLevel()
-  const accuracy = Math.round(position.coords.accuracy)
+  
+  console.log('📍 Nova localização:', {
+    lat: latitude.toFixed(6),
+    lng: longitude.toFixed(6),
+    accuracy: Math.round(accuracy) + 'm'
+  })
   
   try {
-    // Obter endereço (reverse geocoding)
+    // Obter endereço COMPLETO (reverse geocoding)
     const address = await getAddressFromCoords(latitude, longitude)
     
     // Atualizar no banco de dados
@@ -371,7 +423,7 @@ async function updateMyLocation(position) {
         last_location: address,
         last_update: new Date().toISOString(),
         battery,
-        accuracy,
+        accuracy: Math.round(accuracy),
         is_online: true
       })
       .eq('id', myDeviceId)
@@ -382,26 +434,115 @@ async function updateMyLocation(position) {
     await loadDevices()
     
   } catch (error) {
-    console.error('Erro ao atualizar localização:', error)
+    console.error('❌ Erro ao atualizar localização:', error)
   }
 }
 
+// GEOCODING ULTRA PRECISO - Todas as ruas do mundo
 async function getAddressFromCoords(lat, lng) {
+  const cacheKey = `${lat.toFixed(5)}_${lng.toFixed(5)}`
+  
+  // Verificar cache (evita requests repetidas)
+  if (lastAddressCache[cacheKey]) {
+    return lastAddressCache[cacheKey]
+  }
+  
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
-    const data = await response.json()
+    console.log('🔍 Buscando endereço preciso...')
     
-    const address = data.address
+    // API OpenStreetMap Nominatim - MÁXIMA PRECISÃO
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?` +
+      `format=json&` +
+      `lat=${lat}&` +
+      `lon=${lng}&` +
+      `zoom=18&` +                    // Zoom máximo = rua com número
+      `addressdetails=1&` +           // Detalhes completos
+      `extratags=1&` +                // Tags extras
+      `accept-language=pt-BR`,        // Idioma português
+      {
+        headers: {
+          'User-Agent': 'SafeTrack Family Tracker App'
+        }
+      }
+    )
+    
+    if (!response.ok) {
+      throw new Error('Erro na API de geocoding')
+    }
+    
+    const data = await response.json()
+    const addr = data.address
+    
+    // Construir endereço COMPLETO E PRECISO
     const parts = []
     
-    if (address.road) parts.push(address.road)
-    if (address.suburb) parts.push(address.suburb)
-    if (address.city) parts.push(address.city)
+    // 1. RUA/AVENIDA + NÚMERO
+    let street = ''
+    if (addr.road) {
+      street = addr.road
+    } else if (addr.pedestrian) {
+      street = addr.pedestrian
+    } else if (addr.path) {
+      street = addr.path
+    } else if (addr.footway) {
+      street = addr.footway
+    }
     
-    return parts.join(', ') || 'Localização atual'
+    if (street) {
+      if (addr.house_number) {
+        parts.push(`${street}, ${addr.house_number}`)
+      } else {
+        parts.push(street)
+      }
+    }
+    
+    // 2. BAIRRO/REGIÃO
+    if (addr.neighbourhood) {
+      parts.push(addr.neighbourhood)
+    } else if (addr.suburb) {
+      parts.push(addr.suburb)
+    } else if (addr.quarter) {
+      parts.push(addr.quarter)
+    } else if (addr.hamlet) {
+      parts.push(addr.hamlet)
+    }
+    
+    // 3. CIDADE
+    if (addr.city) {
+      parts.push(addr.city)
+    } else if (addr.town) {
+      parts.push(addr.town)
+    } else if (addr.village) {
+      parts.push(addr.village)
+    } else if (addr.municipality) {
+      parts.push(addr.municipality)
+    }
+    
+    // 4. ESTADO (só em caso de cidades pequenas)
+    if (parts.length < 3 && addr.state) {
+      parts.push(addr.state)
+    }
+    
+    let fullAddress = parts.join(', ')
+    
+    // Fallback: Se não conseguiu endereço, usa coordenadas
+    if (!fullAddress || fullAddress.length < 10) {
+      fullAddress = `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+    }
+    
+    // Salvar no cache
+    lastAddressCache[cacheKey] = fullAddress
+    
+    console.log('✅ Endereço encontrado:', fullAddress)
+    console.log('📋 Dados completos:', addr)
+    
+    return fullAddress
+    
   } catch (error) {
-    console.error('Erro ao obter endereço:', error)
-    return 'Localização atual'
+    console.error('❌ Erro ao obter endereço:', error)
+    // Em caso de erro, retorna coordenadas
+    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`
   }
 }
 
@@ -418,14 +559,15 @@ async function getBatteryLevel() {
 }
 
 function handleLocationError(error) {
-  console.error('Erro de geolocalização:', error)
+  console.error('❌ Erro de geolocalização:', error)
   
   switch(error.code) {
     case error.PERMISSION_DENIED:
-      alert('Por favor, permita o acesso à localização para usar o SafeTrack.')
+      alert('⚠️ PERMISSÃO NEGADA!\n\nPor favor, permita o acesso à localização nas configurações do navegador para usar o SafeTrack.')
       break
     case error.POSITION_UNAVAILABLE:
-      console.error('Localização indisponível')
+      console.error('Localização indisponível - GPS pode estar desligado')
+      alert('⚠️ GPS indisponível!\n\nVerifique se:\n• O GPS está ativado\n• Você está ao ar livre\n• O dispositivo tem sinal de satélite')
       break
     case error.TIMEOUT:
       console.error('Timeout ao obter localização')
@@ -447,7 +589,7 @@ function setupRealtime() {
         table: 'devices'
       },
       (payload) => {
-        console.log('Dispositivo atualizado:', payload.new)
+        console.log('🔄 Dispositivo atualizado:', payload.new)
         
         // Atualizar lista de dispositivos
         const index = devices.findIndex(d => d.id === payload.new.id)
@@ -476,7 +618,7 @@ function setupRealtime() {
         table: 'devices'
       },
       (payload) => {
-        console.log('Novo dispositivo:', payload.new)
+        console.log('➕ Novo dispositivo:', payload.new)
         devices.push(payload.new)
         updateDevicesList()
         if (payload.new.latitude && payload.new.longitude) {
